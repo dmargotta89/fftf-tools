@@ -1,0 +1,19 @@
+# virtual environments
+.venv/
+venv/
+env/
+
+# bytecode and packaging
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# tests
+.pytest_cache/
+
+# thumbnail safe-zone overlay PNGs
+*-safe-overlay.png
+*overlay*.png
