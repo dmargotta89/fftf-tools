@@ -15,8 +15,16 @@ import click
 from fftf_tools.brief_pack import run_brief_pack
 from fftf_tools.claim_gate import run_claim_gate
 from fftf_tools.distro_pack import run_distro_pack
+from fftf_tools.distro_runners import (
+    run_distro_podcast,
+    run_distro_podcast_extended,
+    run_distro_shorts,
+    run_distro_status,
+    run_distro_yt_long,
+)
 from fftf_tools.drive_checklist import write_drive_checklist
 from fftf_tools.duck_sheet import run_duck_sheet
+from fftf_tools.edit_pass import run_edit_pass, run_edit_status
 from fftf_tools.picture_sync import run_picture_sync
 from fftf_tools.schema import ContractError
 from fftf_tools.script_strip import run_script_strip
@@ -321,6 +329,165 @@ def thumb_pack_cmd(title_a: str, title_b: str, title_c: str, still: Path | None,
         )
     )
     _emit(payload, [f"safe_zone_ok: {payload.get('safe_zone_ok')}", *_wrote(payload)], as_json)
+
+
+def _finish(payload: dict, lines: list[str], as_json: bool) -> None:
+    _emit(payload, lines, as_json)
+    if not payload.get("ok", True):
+        sys.exit(1)
+
+
+@main.group("edit-pass", invoke_without_command=True)
+@click.pass_context
+@click.option("--pack", default=None, type=click.Path(path_type=Path), help="Assembled episode pack directory.")
+@click.option("--backend", default=None, type=click.Choice(["ffmpeg", "resolve"]), help="Override manifest edit.backend.")
+@click.option("--dry-run/--apply", default=True, help="Dry-run is the default. --apply writes a local master and does not publish.")
+@click.option("--fallback-ffmpeg", is_flag=True, help="If Resolve is missing, use FFmpeg. Without this flag Resolve is not downgraded.")
+@click.option("--allow-pwe", is_flag=True, help="Allow a PWE verdict when CoS has explicitly allowed it.")
+@click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path), help="Output directory.")
+@click.option("--json", "as_json", is_flag=True, help="Print the result JSON on stdout.")
+def edit_pass_group(ctx: click.Context, pack: Path | None, backend: str | None, dry_run: bool, fallback_ffmpeg: bool, allow_pwe: bool, out_dir: Path | None, as_json: bool) -> None:
+    """First-pass edit. Dry-run default. Does not publish or rewrite spoken VO."""
+    if ctx.invoked_subcommand is not None:
+        return
+    if pack is None:
+        raise click.UsageError("Missing option '--pack'.")
+    payload = _guard(
+        lambda: run_edit_pass(
+            pack,
+            backend=backend,
+            apply=not dry_run,
+            fallback_ffmpeg=fallback_ffmpeg,
+            allow_pwe=allow_pwe,
+            out_dir=out_dir,
+        )
+    )
+    lines = [
+        f"status: {payload.get('status')}",
+        f"backend: {payload.get('backend')}",
+        f"dry-run: {str(payload.get('dry_run')).lower()}",
+    ]
+    if payload.get("ref_frame_index") is not None:
+        lines.append(f"ref_frame_index: {payload.get('ref_frame_index')}")
+    lines.extend(f"blocker: {code}" for code in payload.get("blockers") or [])
+    lines.extend(_wrote(payload))
+    _finish(payload, lines, as_json)
+
+
+@edit_pass_group.command("status")
+@click.option("--job", required=True, help="Job id, output directory, or progress.json path.")
+@click.option("--json", "as_json", is_flag=True, help="Print the progress JSON on stdout.")
+def edit_pass_status_cmd(job: str, as_json: bool) -> None:
+    """Read edit/progress.json for a job. Does not publish."""
+    payload = run_edit_status(job)
+    lines = [
+        f"status: {payload.get('status')}",
+        f"stage: {payload.get('stage')}",
+    ]
+    lines.extend(f"blocker: {code}" for code in payload.get("blockers") or [])
+    _finish(payload, lines, as_json)
+
+
+@main.group("distro")
+def distro_group() -> None:
+    """Distro runners. Dry-run default. Never live-publishes.
+
+    Order: yt-long, then shorts (needs the long-form URL), then podcast.
+    podcast-extended is a separate GO and is not part of that wave.
+    Script, Verifier, and Frame have no Distro path.
+    """
+
+
+def _distro_finish(payload: dict, as_json: bool) -> None:
+    lines = [
+        f"runner: {payload.get('runner', 'status')}",
+        f"ok: {str(payload.get('ok')).lower()}",
+        f"dry-run: {str(payload.get('dry_run', True)).lower()}",
+    ]
+    lines.extend(f"blocker: {code}" for code in payload.get("blockers") or [])
+    lines.extend(_wrote(payload))
+    _finish(payload, lines, as_json)
+
+
+@distro_group.command("status")
+@click.option("--pack", required=True, type=click.Path(exists=True, path_type=Path), help="Frozen episode pack.")
+@click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path))
+@click.option("--allow-pwe", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def distro_status_cmd(pack: Path, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
+    """Readiness report and size checklist. Never publishes."""
+    payload = _guard(lambda: run_distro_status(pack, out_dir=out_dir, allow_pwe=allow_pwe))
+    _distro_finish(payload, as_json)
+
+
+@distro_group.command("yt-long")
+@click.option("--pack", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--dry-run/--apply", default=True, help="Dry-run is the default. --apply writes a local plan and does not upload.")
+@click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path))
+@click.option("--allow-pwe", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def distro_yt_long_cmd(pack: Path, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
+    """YouTube long-form wave. First in order. Does not call YouTube."""
+    payload = _guard(
+        lambda: run_distro_yt_long(pack, apply=not dry_run, out_dir=out_dir, allow_pwe=allow_pwe)
+    )
+    _distro_finish(payload, as_json)
+
+
+@distro_group.command("shorts")
+@click.option("--pack", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--longform-url", default=None, help="Canonical long-form URL from yt-long. Required. Not fetched.")
+@click.option("--dry-run/--apply", default=True, help="Dry-run is the default. --apply writes a local plan and does not upload.")
+@click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path))
+@click.option("--allow-pwe", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def distro_shorts_cmd(pack: Path, longform_url: str | None, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
+    """Shorts A–D after yt-long. Hooks stay claim-gated. Does not call YouTube."""
+    payload = _guard(
+        lambda: run_distro_shorts(
+            pack,
+            longform_url=longform_url,
+            apply=not dry_run,
+            out_dir=out_dir,
+            allow_pwe=allow_pwe,
+        )
+    )
+    _distro_finish(payload, as_json)
+
+
+@distro_group.command("podcast")
+@click.option("--pack", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--dry-run/--apply", default=True, help="Dry-run is the default. --apply writes a local plan and does not upload.")
+@click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path))
+@click.option("--allow-pwe", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def distro_podcast_cmd(pack: Path, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
+    """Podcast wave with a LOCKED cover and YT-length audio. Extended audio is not included."""
+    payload = _guard(
+        lambda: run_distro_podcast(pack, apply=not dry_run, out_dir=out_dir, allow_pwe=allow_pwe)
+    )
+    _distro_finish(payload, as_json)
+
+
+@distro_group.command("podcast-extended")
+@click.option("--pack", required=True, type=click.Path(exists=True, path_type=Path))
+@click.option("--go", "go_path", default=None, type=click.Path(path_type=Path), help="Separate Distro GO artifact. The main Distro GO is not enough.")
+@click.option("--dry-run/--apply", default=True, help="Dry-run is the default. --apply writes a local plan and does not upload.")
+@click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path))
+@click.option("--allow-pwe", is_flag=True)
+@click.option("--json", "as_json", is_flag=True)
+def distro_podcast_extended_cmd(pack: Path, go_path: Path | None, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
+    """Optional extended podcast audio. Separate GO. Not part of the YT wave."""
+    payload = _guard(
+        lambda: run_distro_podcast_extended(
+            pack,
+            go_path=go_path,
+            apply=not dry_run,
+            out_dir=out_dir,
+            allow_pwe=allow_pwe,
+        )
+    )
+    _distro_finish(payload, as_json)
 
 
 if __name__ == "__main__":

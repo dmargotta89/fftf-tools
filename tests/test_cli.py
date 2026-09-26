@@ -19,6 +19,8 @@ def test_help_lists_commands():
         "script-strip",
         "picture-sync",
         "thumb-pack",
+        "edit-pass",
+        "distro",
     ):
         assert cmd in result.output
 

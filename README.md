@@ -150,6 +150,40 @@ No external generative API. With no still, Pillow draws high-contrast title card
 fftf thumb-pack --episode-id ep04-glomar-azorian --title-a "The ship" --title-b "The cover" --title-c "The files" -o ./ep04/thumb
 ```
 
+### 12. `edit-pass` — first-pass master
+
+Reads an assembled episode pack (`manifest.json` plus verdict, stamps, `caption_safe`, `asset_index`, LIVE thumbs, and VO). Dry-run is the default. It plans reference frames and grades and writes `edit/progress.json` and `edit/report.md`. It does not write a master until `--apply`.
+
+`--apply` writes `masters/epNN-edit-vN.mp4` with the FFmpeg path (color match toward an auto reference frame, loudnorm, music duck as a no-op when `music.enabled` is false). Reference-frame selection never uses frame 0. Spoken VO and caption files are not rewritten. Lower-thirds come only from `caption_safe` or Verifier-approved quote cards.
+
+`--backend resolve` blocks with `resolve_unavailable` when Resolve is not on the worker. It does not switch to FFmpeg unless `--fallback-ffmpeg` is passed.
+
+Bake is refused when the Verifier pin, Daniel script stamp, LIVE thumbs, wording hash, `caption_safe`, or license/SHA gates fail. `distro_blocked` stays true. This command does not publish.
+
+```bash
+fftf edit-pass --pack ./ep05/pack -o ./ep05/edit
+fftf edit-pass --pack ./ep05/pack --apply -o ./ep05/edit
+fftf edit-pass status --job ./ep05/edit
+```
+
+### 13. `distro` — readiness and ordered runners
+
+`status`, `yt-long`, `shorts`, `podcast`, and `podcast-extended`. Dry-run is the default. `status` prints a gate matrix, LIVE thumb pins, and a PC-pack size checklist. It never publishes.
+
+`yt-long` is first. `shorts` requires `--longform-url` (the URL is not fetched). `podcast` requires a LOCKED cover and YT-length audio, and does not include extended audio. `podcast-extended` needs its own Distro GO and is not part of the YT wave.
+
+`--apply` writes a local plan and `distro/room-report.json`. Live YouTube and Spotify stay closed: `published` is false and `distro_blocked` is true. Script, Verifier, and Frame have no Distro path. `distro-pack` is still the local Studio paste pack; it is not this runner.
+
+These commands follow the specs Daniel stamped on 2026-09-26: the Distro toolkit team input, Episode Edit Module v1, and Distro utility plan v1.
+
+```bash
+fftf distro status --pack ./ep05/pack -o ./ep05/distro
+fftf distro yt-long --pack ./ep05/pack -o ./ep05/distro
+fftf distro shorts --pack ./ep05/pack --longform-url https://example.com/ep05 -o ./ep05/distro
+fftf distro podcast --pack ./ep05/pack -o ./ep05/distro
+fftf distro podcast-extended --pack ./ep05/pack --go ./ep05/pack/podcast-extended-go.json
+```
+
 ## Shared machine contract
 
 Blocks are built with `fftf_tools.machine.machine_block` and checked against `schemas/machine-contract.schema.json`. Pipeline commands go through `fftf_tools.schema`, which calls `machine_block` and `write_machine_json` instead of writing a second shape.
