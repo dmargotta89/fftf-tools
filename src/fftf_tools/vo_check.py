@@ -84,6 +84,22 @@ def _count_words(stripped: str) -> int:
     return len(re.findall(r"[A-Za-z0-9']+", stripped))
 
 
+def spoken_stats(text: str) -> tuple[int, float, dict[str, int]]:
+    """Return ``(word_count, duration_min, marker_counts)`` for a spoken body.
+
+    Duration uses 160 words per minute plus the pause table for ``[br]``,
+    ``[p]``, and ``[P]``. Headings should already be removed by the caller.
+    """
+    counts = {"[br]": 0, "[p]": 0, "[P]": 0, "|": 0}
+    for match in MARKER_RE.finditer(text):
+        token = match.group(0)
+        counts[token] = counts.get(token, 0) + 1
+    word_count = _count_words(_strip_markers(text))
+    speech_min = word_count / WORDS_PER_MIN if word_count else 0.0
+    pause_s = sum(counts.get(key, 0) * PAUSE_DUR[key] for key in PAUSE_DUR)
+    return word_count, speech_min + pause_s / 60.0, counts
+
+
 def _has_header(text: str, pattern: str) -> bool:
     return bool(re.search(pattern, text, re.I | re.M))
 
@@ -165,15 +181,7 @@ def validate_vo_timing(
 
     # --- marker counts & duration estimate ---
     body = _spoken_body(lines)
-    counts = {"[br]": 0, "[p]": 0, "[P]": 0, "|": 0}
-    for m in MARKER_RE.finditer(body):
-        counts[m.group(0)] = counts.get(m.group(0), 0) + 1
-
-    stripped = _strip_markers(body)
-    word_count = _count_words(stripped)
-    speech_min = word_count / WORDS_PER_MIN if word_count else 0.0
-    pause_s = sum(counts.get(k, 0) * PAUSE_DUR[k] for k in PAUSE_DUR)
-    duration_min = speech_min + pause_s / 60.0
+    word_count, duration_min, counts = spoken_stats(body)
 
     if word_count == 0:
         ok = False

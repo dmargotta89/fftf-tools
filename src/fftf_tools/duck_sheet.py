@@ -29,6 +29,15 @@ class DuckCue:
     duration_s: float
     label: str
     vo_pause_note: str = "pause VO under clip audio"
+    source_path: str = ""
+
+
+@dataclass
+class ClipSection:
+    clip: str
+    source_path: str
+    body: str
+    start: int
 
 
 def _tc_to_seconds(tc: str) -> float:
@@ -46,20 +55,18 @@ def _clip_name_from_path(path: str) -> str:
     return Path(path).stem
 
 
-def _current_clip_context(text: str) -> list[tuple[int, str, str]]:
-    """Return list of (start_offset, clip_label, path_or_title) section starts."""
-    sections: list[tuple[int, str, str]] = []
-    for m in re.finditer(r"^##\s+(.+)$", text, re.M):
-        title = m.group(1).strip()
+def _sections_from_text(text: str) -> list[ClipSection]:
+    sections: list[ClipSection] = []
+    for match in re.finditer(r"^##\s+(.+)$", text, re.M):
+        title = match.group(1).strip()
         # skip meta sections
         if re.match(
             r"(?i)(failures|cut remux|remux order|recommended)",
             title,
         ):
             continue
-        # look ahead for path in this section
-        nxt = re.search(r"^##\s+", text[m.end() :], re.M)
-        body = text[m.end() : m.end() + (nxt.start() if nxt else len(text))]
+        nxt = re.search(r"^##\s+", text[match.end() :], re.M)
+        body = text[match.end() : match.end() + (nxt.start() if nxt else len(text))]
         path_m = PATH_RE.search(body)
         path = ""
         if path_m:
@@ -68,18 +75,34 @@ def _current_clip_context(text: str) -> list[tuple[int, str, str]]:
             r"^\d+[.)]\s*", "", title
         )
         clip = re.sub(r"\s+", " ", clip).strip()
-        sections.append((m.start(), clip, path or title))
+        sections.append(
+            ClipSection(clip=clip, source_path=path, body=body, start=match.start())
+        )
     return sections
 
 
-def _clip_at(sections: list[tuple[int, str, str]], pos: int) -> str:
-    current = "unknown"
-    for start, clip, _ in sections:
+def parse_clip_sections(path: Path | str) -> list[ClipSection]:
+    """Section index shared with duck-cue parsing (clip, path, body)."""
+    return _sections_from_text(Path(path).read_text(encoding="utf-8"))
+
+
+def _current_clip_context(text: str) -> list[tuple[int, str, str]]:
+    """Return list of (start_offset, clip_label, source_path) section starts."""
+    return [(sec.start, sec.clip, sec.source_path) for sec in _sections_from_text(text)]
+
+
+def _section_at(sections: list[tuple[int, str, str]], pos: int) -> tuple[str, str]:
+    current = ("unknown", "")
+    for start, clip, source_path in sections:
         if start <= pos:
-            current = clip
+            current = (clip, source_path)
         else:
             break
     return current
+
+
+def _clip_at(sections: list[tuple[int, str, str]], pos: int) -> str:
+    return _section_at(sections, pos)[0]
 
 
 def parse_duck_cues(path: Path | str) -> list[DuckCue]:
@@ -109,7 +132,7 @@ def parse_duck_cues(path: Path | str) -> list[DuckCue]:
             dur = float(lm.group("sec"))
         else:
             dur = max(0.0, _tc_to_seconds(out_tc) - _tc_to_seconds(in_tc))
-        clip = _clip_at(sections, m.start())
+        clip, source_path = _section_at(sections, m.start())
         key = (clip, in_tc, out_tc)
         if key in seen:
             continue
@@ -121,6 +144,7 @@ def parse_duck_cues(path: Path | str) -> list[DuckCue]:
                 out_tc=out_tc,
                 duration_s=dur,
                 label=label,
+                source_path=source_path,
             )
         )
 
@@ -146,7 +170,7 @@ def parse_duck_cues(path: Path | str) -> list[DuckCue]:
             dur = max(0.0, _tc_to_seconds(out_tc) - _tc_to_seconds(in_tc))
         label = (m.group("label") or "").strip()
         label = re.sub(r"\*\*", "", label)
-        clip = _clip_at(sections, m.start())
+        clip, source_path = _section_at(sections, m.start())
         key = (clip, in_tc, out_tc)
         if key in seen:
             continue
@@ -158,6 +182,7 @@ def parse_duck_cues(path: Path | str) -> list[DuckCue]:
                 out_tc=out_tc,
                 duration_s=dur,
                 label=label,
+                source_path=source_path,
             )
         )
 

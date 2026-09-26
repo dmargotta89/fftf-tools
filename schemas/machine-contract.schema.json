@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dmargotta89/fftf-tools/schemas/machine-contract.schema.json",
+  "title": "FFTF machine contract",
+  "description": "Shared JSON block for From Fiction to Fact agent tools. distro_blocked is always true. These tools never unlock Distro, publish, call YouTube or Spotify, or spend money.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["episode_id", "sources", "fences", "asset_index", "distro_blocked"],
+  "properties": {
+    "episode_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "Stable episode slug, for example ep04-glomar-azorian."
+    },
+    "sources": {
+      "type": "array",
+      "description": "Wave 2 sources use id, locator, label, origin, and verified. Pipeline sources also carry n and url. Both shapes are valid on the same object. verified is never true.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {"type": "string"},
+          "n": {"type": "integer", "minimum": 1},
+          "url": {
+            "type": "string",
+            "description": "Real http(s) URL, or PLACEHOLDER when the agent has not filled research yet. Tools must not invent URLs."
+          },
+          "locator": {"type": "string"},
+          "label": {"type": "string"},
+          "origin": {"type": "string"},
+          "verified": {"const": false}
+        }
+      }
+    },
+    "fences": {
+      "type": "array",
+      "description": "Wave 2 fences use id, text, and locked. Pipeline fences also carry rule and status. Status is checked only when present.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "text": {"type": "string"},
+          "rule": {"type": "string"},
+          "status": {"enum": ["held", "broken", "unknown"]},
+          "locked": {"type": "boolean"},
+          "origin": {"type": "string"},
+          "pattern": {
+            "type": "string",
+            "description": "Optional literal (not a regex) that claim-gate looks for in the spoken body."
+          }
+        }
+      }
+    },
+    "asset_index": {
+      "type": "array",
+      "description": "Wave 2 assets are role and path. When a picture beat is known, beat, license, and sha256 are also set. An unknown beat value still fails.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": {"type": "string"},
+          "role": {"type": "string"},
+          "note": {"type": "string"},
+          "beat": {
+            "enum": ["fiction", "pushback", "reveal", "aftermath", "cold_open"]
+          },
+          "license": {"enum": ["PD", "gov", "cia", "other"]},
+          "sha256": {
+            "type": "string",
+            "description": "Hex digest when the file is on disk; empty string until the asset is in hand."
+          }
+        }
+      }
+    },
+    "distro_blocked": {
+      "const": true,
+      "description": "Always true. These tools cannot unlock Distro."
+    },
+    "verdict": {"enum": ["PASS", "PASS_WITH_EDITS", "FAIL"]},
+    "fence_results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {"type": "string"},
+          "rule": {"type": "string"},
+          "status": {"enum": ["held", "broken", "unknown"]},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "required_edits": {"type": "array", "items": {"type": "string"}},
+    "soft_fails": {"type": "array", "items": {"type": "string"}},
+    "spoken_word_count": {"type": "integer", "minimum": 0},
+    "narration_match": {"type": ["boolean", "null"]},
+    "duration_min_estimate": {"type": "number", "minimum": 0},
+    "ducks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["clip", "in", "out", "duration_s", "label"],
+        "properties": {
+          "clip": {"type": "string"},
+          "in": {"type": "string"},
+          "out": {"type": "string"},
+          "duration_s": {"type": "number"},
+          "label": {"type": "string"},
+          "vo_pause_note": {"type": "string"},
+          "beat": {"type": "string"}
+        }
+      }
+    },
+    "sync_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["level", "code", "detail"],
+        "properties": {
+          "level": {"enum": ["info", "warn", "fail"]},
+          "code": {"type": "string"},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "qc_gates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "status", "detail"],
+        "properties": {
+          "id": {"type": "string"},
+          "status": {"enum": ["pass", "fail", "warn"]},
+          "detail": {"type": "string"}
+        }
+      }
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["id", "title_text", "yt_md5", "ig_md5"],
+        "properties": {
+          "id": {"type": "string"},
+          "title_text": {"type": "string"},
+          "yt_md5": {"type": "string"},
+          "ig_md5": {"type": "string"}
+        }
+      }
+    },
+    "safe_zone_ok": {"type": "boolean"},
+    "tool": {"type": "string"}
+  }
+}
