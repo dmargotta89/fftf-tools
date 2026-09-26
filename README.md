@@ -60,6 +60,46 @@ Loads an image with Pillow, draws the safe-zone rectangle, writes an overlay PNG
 fftf thumb-safe /path/to/thumb.png -o /tmp/thumb-safe.png --side 0.10 --top 0.12 --bottom 0.12
 ```
 
+### 5. `distro-pack` — local Studio paste pack
+
+Reads a stamped draft or narration-only file, plus optional VO-timing and a thumbnail path. Writes `distro/epXX/` (or `-o`):
+
+- `TITLE.txt`
+- `DESCRIPTION.md` — cold-open hook quoted from the draft, source placeholders, CTA, FFTF naming
+- `TAGS.txt`
+- `CHAPTERS.txt` — from VO-timing section headers when those headers exist (times are markup estimates, not a bake timeline)
+- `SHORTS-CAPTIONS.md` — captions A–D with a long-form URL placeholder
+- `machine.json` — always `"distro_blocked": true`
+
+Does not upload. A human still pastes into Studio. Primary-source lines stay placeholders unless the locator is already in the input, and even then it is recorded only in machine JSON as unverified.
+
+### 6. `shorts-cutter` — Shorts A–D bake brief
+
+Reads VO-timing markdown and optional `CLIP-NOTES`. Writes `shorts/epXX/SHORTS-SHOTLIST.md` with four cuts (A–D). Each cut has a hook line, an in/out (VO line ref and, when a clip note matches, a clip timecode), a CTA beat, and a 9:16 note. Also writes `machine.json` with `"distro_blocked": true`.
+
+Does not render video.
+
+## Agent usage
+
+`distro-pack` and `shorts-cutter` are local Cut helpers. They do not upload, render, call YouTube or Spotify, or unlock Distro. Channel display name is **From Fiction to Fact** (FFTF only).
+
+Machine JSON always has these fields: `episode_id`, `sources`, `fences`, `asset_index`, and `distro_blocked`. `distro_blocked` is the boolean `true`. If it is missing or not true, stop. Do not invent a primary source; fill a description placeholder only from the stamped draft. `sources[].verified` stays false. `{{LONG_FORM_URL}}` is a placeholder, not a live link.
+
+```bash
+fftf distro-pack --ep 3 --title "Watergate" \
+  --draft samples/ep03-watergate-v1.1-vo-timing-v3.md \
+  --vo samples/ep03-watergate-v1.1-vo-timing-v3.md \
+  --thumb path/to/thumb.png \
+  -o distro/ep03
+
+fftf shorts-cutter --ep 3 --title "Watergate" \
+  --vo samples/ep03-watergate-v1.1-vo-timing-v3.md \
+  --clips samples/CLIP-NOTES.md \
+  -o shorts/ep03
+```
+
+Read `machine.json` in the output directory before any Studio paste.
+
 ## Samples
 
 Reference files under `samples/`:
