@@ -7,5 +7,12 @@ def test_help_lists_commands():
     runner = CliRunner()
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0
-    for cmd in ("vo-check", "duck-sheet", "drive-checklist", "thumb-safe"):
+    for cmd in (
+        "vo-check",
+        "duck-sheet",
+        "drive-checklist",
+        "thumb-safe",
+        "distro-pack",
+        "shorts-cutter",
+    ):
         assert cmd in result.output
