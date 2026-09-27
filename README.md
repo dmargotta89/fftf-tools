@@ -250,6 +250,8 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
+Desk dry-runs, copy-paste commands, and expected PASS/FAIL behavior are in `OPERATOR.md`.
+
 ## Layout
 
 ```

@@ -4,6 +4,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from fftf_tools.cli import main
+from fftf_tools.schema import validate_machine
 from fftf_tools.shorts_cutter import run_shorts_cutter
 
 
@@ -51,7 +52,11 @@ def test_shorts_cutter_with_clip_notes(vo_sample: Path, clip_notes: Path, tmp_pa
     vo_text = vo_sample.read_text(encoding="utf-8")
     for source in data["sources"]:
         assert source["verified"] is False
+        assert source["url"] == source["locator"]
+        assert source["n"] >= 1
         assert source["locator"] in clip_text or source["locator"] in vo_text
+    assert all(item["rule"] and item["status"] in {"held", "broken", "unknown"} for item in data["fences"])
+    assert validate_machine(data) == []
     assert any(item["id"] == "no-distro" for item in data["fences"])
     roles = {item["role"] for item in data["asset_index"]}
     assert {"vo-timing", "clip-notes", "shorts-shotlist", "machine"} <= roles

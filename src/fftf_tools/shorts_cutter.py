@@ -11,8 +11,8 @@ from fftf_tools.machine import (
     CHANNEL_SHORT,
     episode_id_for,
     machine_block,
-    write_machine_json,
 )
+from fftf_tools.schema import write_machine
 from fftf_tools.vo_sections import (
     VoSection,
     extract_fences,
@@ -323,7 +323,8 @@ def run_shorts_cutter(
         renders_video=False,
         uploads=False,
     )
-    machine_path = write_machine_json(out / "machine.json", block)
+    machine_path = out / "machine.json"
+    block = write_machine(machine_path, block)
     print(f"wrote {shot_path}")
     print(f"wrote {machine_path}")
     print("distro_blocked: true")

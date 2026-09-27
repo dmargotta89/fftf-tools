@@ -141,11 +141,77 @@ def validate_machine(data: Any) -> list[str]:
     return validate_instance(data, machine_schema())
 
 
+_SOURCE_ID_RE = re.compile(r"s(\d+)")
+_ALLOWED_LICENSES = {"PD", "gov", "cia", "other"}
+
+
+def _same_locator(item: dict[str, Any]) -> str:
+    """``locator`` and ``url`` are the same string when either one is set."""
+    locator = str(item.get("locator") or "")
+    url = str(item.get("url") or "")
+    if locator and not url:
+        return locator
+    if url and not locator:
+        return url
+    return locator or url
+
+
+def _complete_source(item: Any) -> Any:
+    """Fill the dual source shape the machine contract documents.
+
+    Wave 2 fields (``id``, ``locator``, ``label``, ``origin``, ``verified``)
+    and pipeline fields (``n``, ``url``) sit on one object. ``verified`` is
+    never true. A missing URL is not invented.
+    """
+    if not isinstance(item, dict):
+        return item
+    data = dict(item)
+    locator = _same_locator(data)
+    if locator:
+        data["locator"] = locator
+        data["url"] = locator
+    n_raw = data.get("n")
+    if n_raw is None:
+        match = _SOURCE_ID_RE.fullmatch(str(data.get("id", "")).strip())
+        if match:
+            n_raw = int(match.group(1))
+    if isinstance(n_raw, int) and not isinstance(n_raw, bool) and n_raw >= 1:
+        data["n"] = n_raw
+        data.setdefault("id", f"s{n_raw}")
+    elif isinstance(n_raw, str) and n_raw.isdigit() and int(n_raw) >= 1:
+        data["n"] = int(n_raw)
+        data.setdefault("id", f"s{int(n_raw)}")
+    data["verified"] = False
+    return data
+
+
+def _complete_fence(item: Any) -> Any:
+    """Fill ``text``/``rule`` and ``status`` so a fence matches the contract.
+
+    Locked tool fences with no status are ``held``. An explicit status is kept.
+    """
+    if not isinstance(item, dict):
+        return item
+    data = dict(item)
+    text = str(data.get("text") or data.get("rule") or "")
+    rule = str(data.get("rule") or text)
+    data["text"] = text
+    data["rule"] = rule
+    if "locked" not in data:
+        data["locked"] = True
+    status = data.get("status")
+    if status in (None, ""):
+        data["status"] = "held" if data.get("locked") else "unknown"
+    return data
+
+
 def seal(payload: dict[str, Any]) -> dict[str, Any]:
     """Copy ``payload``, force Distro locked and sources unverified, then validate.
 
     Callers cannot unlock Distro by passing false, and cannot mark a source
-    verified. The written block is rejected if any other contract rule fails.
+    verified. Sources gain ``n``/``url`` when the other half of the pair is
+    already present. Fences gain ``rule`` and ``status`` when those were
+    omitted. The written block is rejected if any other contract rule fails.
     """
     if not isinstance(payload, dict):
         raise ContractError("machine contract must be a JSON object")
@@ -153,13 +219,10 @@ def seal(payload: dict[str, Any]) -> dict[str, Any]:
     data["distro_blocked"] = True
     sources = data.get("sources")
     if isinstance(sources, list):
-        locked_sources = []
-        for item in sources:
-            if isinstance(item, dict):
-                item = dict(item)
-                item["verified"] = False
-            locked_sources.append(item)
-        data["sources"] = locked_sources
+        data["sources"] = [_complete_source(item) for item in sources]
+    fences = data.get("fences")
+    if isinstance(fences, list):
+        data["fences"] = [_complete_fence(item) for item in fences]
     errors = validate_machine(data)
     if errors:
         raise ContractError(errors)
@@ -326,6 +389,13 @@ class Asset:
             data["beat"] = self.beat
             data["license"] = self.license
             data["sha256"] = self.sha256
+        else:
+            # License and digest are part of the contract even when no picture
+            # beat is known. An empty license is omitted so it cannot fail the enum.
+            if self.license in _ALLOWED_LICENSES:
+                data["license"] = self.license
+            if self.sha256:
+                data["sha256"] = self.sha256
         if self.note:
             data["note"] = self.note
         return data
