@@ -5,6 +5,7 @@ from pathlib import Path
 from click.testing import CliRunner
 
 from fftf_tools.cli import main
+from fftf_tools.gates import GATE_MATRIX
 from fftf_tools.distro_runners import (
     run_distro_podcast,
     run_distro_podcast_extended,
@@ -46,6 +47,119 @@ def test_status_dry_run_happy(tmp_path: Path):
     machine = result["machine"]
     assert machine["distro_blocked"] is True
     assert validate_machine(machine) == []
+
+
+def _dump(path: Path, payload: object) -> None:
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def test_status_gate_matrix_each_row(tmp_path: Path):
+    """Every stamped gate row is ok on a clean pack, and each row can fail on its own."""
+    clean = build_episode_pack(tmp_path / "clean")
+    happy = run_distro_status(clean, out_dir=tmp_path / "happy")
+    assert [row["id"] for row in happy["gates"]] == [item[0] for item in GATE_MATRIX]
+    assert all(row["ok"] for row in happy["gates"]), happy["blockers"]
+    status_md = (tmp_path / "happy" / "distro" / "status.md").read_text(encoding="utf-8")
+    for gate_id, _label, _codes in GATE_MATRIX:
+        assert f"| {gate_id} |" in status_md
+    assert happy["published"] is False
+    assert happy["distro_blocked"] is True
+
+    def check(name: str, mutate, gate_id: str, code: str) -> None:
+        root = build_episode_pack(tmp_path / name)
+        mutate(root)
+        report = run_distro_status(root, out_dir=tmp_path / f"out-{name}")
+        rows = {row["id"]: row for row in report["gates"]}
+        assert report["ok"] is False
+        assert report["published"] is False
+        assert report["distro_blocked"] is True
+        assert rows[gate_id]["ok"] is False
+        assert code in rows[gate_id]["blockers"]
+        assert code in report["blockers"]
+
+    def manifest(root: Path) -> dict:
+        return json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+
+    def write_manifest(root: Path, data: dict) -> None:
+        _dump(root / "manifest.json", data)
+
+    def drop_verdict(root: Path) -> None:
+        (root / "verifier" / "verdict.json").unlink()
+
+    def bad_wording(root: Path) -> None:
+        path = root / "verifier" / "verdict.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["wording_hash"] = "0" * 64
+        _dump(path, data)
+
+    def unstamped(root: Path) -> None:
+        data = manifest(root)
+        data["stamps"]["script_stamped"] = False
+        data["stamps"]["script_stamped_by"] = ""
+        write_manifest(root, data)
+
+    def bad_chrome(root: Path) -> None:
+        data = manifest(root)
+        data["stamps"]["chrome_lock"]["font"] = "Comic Sans"
+        write_manifest(root, data)
+
+    def caption_copies_notes(root: Path) -> None:
+        path = root / "caption_safe.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["cards"][0]["text"] = data["notes"]
+        _dump(path, data)
+
+    def blank_license(root: Path) -> None:
+        path = root / "asset_index.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for asset in data["assets"]:
+            if asset["asset_id"] == "hero":
+                asset["license"] = ""
+        _dump(path, data)
+
+    def picture_qc_open(root: Path) -> None:
+        data = manifest(root)
+        data["picture_qc"]["passed"] = False
+        write_manifest(root, data)
+
+    def wrong_name(root: Path) -> None:
+        data = manifest(root)
+        data["display_name_lock"] = "Some Other Show"
+        write_manifest(root, data)
+
+    def empty_hook(root: Path) -> None:
+        data = manifest(root)
+        data["meta"]["shorts_hooks"]["A"] = ""
+        write_manifest(root, data)
+
+    def bad_master_hash(root: Path) -> None:
+        data = manifest(root)
+        data["masters"]["longform"]["sha256"] = "0" * 64
+        write_manifest(root, data)
+
+    def box_only(root: Path) -> None:
+        data = manifest(root)
+        data["ingest"]["box_studio_only"] = True
+        write_manifest(root, data)
+
+    def no_go(root: Path) -> None:
+        path = root / "distro-go.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["approved"] = False
+        _dump(path, data)
+
+    check("verdict", drop_verdict, "verdict", "gate_verdict_missing")
+    check("wording", bad_wording, "wording", "gate_wording_hash_mismatch")
+    check("dual-stamp", unstamped, "dual_stamp", "gate_script_unstamped")
+    check("thumbs", bad_chrome, "thumbs", "gate_chrome_lock")
+    check("caption", caption_copies_notes, "caption_safe", "gate_caption_safe_equals_notes")
+    check("assets", blank_license, "asset_index", "gate_license_missing")
+    check("picture", picture_qc_open, "picture_qc", "gate_picture_qc")
+    check("display", wrong_name, "display_name", "gate_display_name")
+    check("meta", empty_hook, "meta", "gate_shorts_hooks")
+    check("masters", bad_master_hash, "masters", "gate_master_hash_mismatch")
+    check("ingest", box_only, "ingest", "gate_ingest_box_only")
+    check("authority", no_go, "authority", "gate_distro_go")
 
 
 def test_distro_refuses_gates(tmp_path: Path):

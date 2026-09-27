@@ -7,18 +7,23 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-TIME_RE = re.compile(
-    r"(?P<in>\d{1,2}:\d{2}(?::\d{2})?)\s*[–—-]\s*(?P<out>\d{1,2}:\d{2}(?::\d{2})?)"
-)
+# MM:SS or HH:MM:SS, optional fractional seconds. Separators are dash, arrow, or "->".
+_TC = r"\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?"
+_SEP = r"\s*(?:[–—\-]|→|->)\s*"
+TIME_RE = re.compile(rf"(?P<in>{_TC}){_SEP}(?P<out>{_TC})")
 LEN_RE = re.compile(r"~?\s*(?P<sec>\d+(?:\.\d+)?)\s*s", re.I)
 CLIP_HEADING_RE = re.compile(
     r"^##\s+(?:\d+[.)]\s*)?(?P<title>.+?)(?:\s*[—–-].*)?$",
     re.M,
 )
 PATH_RE = re.compile(
-    r"(?:\*\*path\*\*\s*\|\s*`([^`]+)`)|(?:[-*]\s*Path:\s*`([^`]+)`)",
-    re.I,
+    r"(?:\*\*path\*\*\s*\|\s*`?([^`|\n]+?)`?(?:\s*\||$))|(?:[-*]\s*Path:\s*`?([^`\n]+?)`?\s*$)",
+    re.I | re.M,
 )
+# Index lists and failure logs are not insert cues. A cue inside one of these
+# headings is ignored so it is not glued onto the previous clip.
+_META_HEADING_RE = re.compile(r"(?i)(failures|cut remux|remux order|recommended)")
+_LIST_ITEM_RE = re.compile(r"^[\t ]*(?:[-*]|\d+[.)])\s+(?P<body>.+?)\s*$", re.M)
 
 
 @dataclass
@@ -41,13 +46,16 @@ class ClipSection:
 
 
 def _tc_to_seconds(tc: str) -> float:
-    parts = [int(p) for p in tc.split(":")]
-    if len(parts) == 2:
-        m, s = parts
-        return m * 60 + s
-    if len(parts) == 3:
-        h, m, s = parts
-        return h * 3600 + m * 60 + s
+    parts = tc.split(":")
+    try:
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return int(minutes) * 60 + float(seconds)
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except ValueError as exc:
+        raise ValueError(f"bad timecode: {tc}") from exc
     raise ValueError(f"bad timecode: {tc}")
 
 
@@ -55,28 +63,43 @@ def _clip_name_from_path(path: str) -> str:
     return Path(path).stem
 
 
+def _heading_blocks(text: str) -> list[tuple[int, int, bool]]:
+    """Return ``(start, end, skipped)`` for each ``##`` heading."""
+    matches = list(re.finditer(r"^##\s+(.+)$", text, re.M))
+    blocks: list[tuple[int, int, bool]] = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        title = match.group(1).strip()
+        blocks.append((match.start(), end, bool(_META_HEADING_RE.search(title))))
+    return blocks
+
+
+def _in_skipped_heading(blocks: list[tuple[int, int, bool]], pos: int) -> bool:
+    for start, end, skipped in blocks:
+        if start <= pos < end:
+            return skipped
+    return False
+
+
 def _sections_from_text(text: str) -> list[ClipSection]:
     sections: list[ClipSection] = []
-    for match in re.finditer(r"^##\s+(.+)$", text, re.M):
-        title = match.group(1).strip()
-        # skip meta sections
-        if re.match(
-            r"(?i)(failures|cut remux|remux order|recommended)",
-            title,
-        ):
+    blocks = _heading_blocks(text)
+    matches = list(re.finditer(r"^##\s+(.+)$", text, re.M))
+    for match, (start, end, skipped) in zip(matches, blocks):
+        if skipped:
             continue
-        nxt = re.search(r"^##\s+", text[match.end() :], re.M)
-        body = text[match.end() : match.end() + (nxt.start() if nxt else len(text))]
+        title = match.group(1).strip()
+        body = text[match.end() : end]
         path_m = PATH_RE.search(body)
         path = ""
         if path_m:
-            path = path_m.group(1) or path_m.group(2) or ""
+            path = (path_m.group(1) or path_m.group(2) or "").strip().strip("`")
         clip = _clip_name_from_path(path) if path else re.sub(
             r"^\d+[.)]\s*", "", title
         )
         clip = re.sub(r"\s+", " ", clip).strip()
         sections.append(
-            ClipSection(clip=clip, source_path=path, body=body, start=match.start())
+            ClipSection(clip=clip, source_path=path, body=body, start=start)
         )
     return sections
 
@@ -105,85 +128,126 @@ def _clip_at(sections: list[tuple[int, str, str]], pos: int) -> str:
     return _section_at(sections, pos)[0]
 
 
+def _duration_seconds(in_tc: str, out_tc: str, length_text: str) -> float:
+    match = LEN_RE.search(length_text) if length_text else None
+    if match:
+        return float(match.group("sec"))
+    return max(0.0, _tc_to_seconds(out_tc) - _tc_to_seconds(in_tc))
+
+
+def _clean_label(text: str) -> str:
+    label = re.sub(r"\*\*", "", text)
+    label = re.sub(r"^[\s*`]*", "", label)
+    label = re.sub(r"^[—–\-:]+\s*", "", label)
+    return re.sub(r"\s+", " ", label).strip()
+
+
+def _span_from_body(body: str) -> tuple[str, str, float, str] | None:
+    """Pull in/out, duration, and label from one list-item body."""
+    match = TIME_RE.search(body)
+    if not match:
+        return None
+    in_tc, out_tc = match.group("in"), match.group("out")
+    after = body[match.end() :]
+    length_match = re.match(
+        r"\s*(?:\*\*)?\s*\((?P<len>~?\s*\d+(?:\.\d+)?\s*s)\)",
+        after,
+    )
+    if length_match:
+        duration = _duration_seconds(in_tc, out_tc, length_match.group("len"))
+        after = after[length_match.end() :]
+    else:
+        nearby = LEN_RE.search(after)
+        if nearby and nearby.start() <= 8:
+            duration = float(nearby.group("sec"))
+            after = after[: nearby.start()] + after[nearby.end() :]
+        else:
+            duration = _duration_seconds(in_tc, out_tc, "")
+    return in_tc, out_tc, duration, _clean_label(after)
+
+
+def _remember(
+    cues: list[DuckCue],
+    seen: set[tuple[str, str, str]],
+    *,
+    clip: str,
+    source_path: str,
+    in_tc: str,
+    out_tc: str,
+    duration_s: float,
+    label: str,
+) -> None:
+    key = (clip, in_tc, out_tc)
+    if key in seen:
+        return
+    seen.add(key)
+    cues.append(
+        DuckCue(
+            clip=clip,
+            in_tc=in_tc,
+            out_tc=out_tc,
+            duration_s=duration_s,
+            label=label,
+            source_path=source_path,
+        )
+    )
+
+
 def parse_duck_cues(path: Path | str) -> list[DuckCue]:
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
     sections = _current_clip_context(text)
+    skipped = _heading_blocks(text)
     cues: list[DuckCue] = []
     seen: set[tuple[str, str, str]] = set()
 
     # Style A: markdown table rows | **03:18–03:32** | **~14s** | label |
+    # Also accepts arrows (03:18→03:32, 03:18->03:32) and fractional seconds.
     table_row = re.compile(
-        r"^\|\s*\*?\*?("
-        r"\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*\d{1,2}:\d{2}(?::\d{2})?"
-        r")\*?\*?\s*\|\s*\*?\*?([^|]+?)\*?\*?\s*\|\s*([^|]+?)\s*\|",
+        r"^\|\s*\*?\*?(?P<span>[^|]+?)\*?\*?\s*\|\s*\*?\*?(?P<length>[^|]+?)\*?\*?\s*\|\s*(?P<label>[^|]+?)\s*\|",
         re.M,
     )
-    for m in table_row.finditer(text):
-        span = m.group(1)
-        len_cell = m.group(2).strip()
-        label = re.sub(r"\*\*", "", m.group(3)).strip()
-        tm = TIME_RE.search(span)
-        if not tm:
+    for match in table_row.finditer(text):
+        if _in_skipped_heading(skipped, match.start()):
             continue
-        in_tc, out_tc = tm.group("in"), tm.group("out")
-        lm = LEN_RE.search(len_cell)
-        if lm:
-            dur = float(lm.group("sec"))
-        else:
-            dur = max(0.0, _tc_to_seconds(out_tc) - _tc_to_seconds(in_tc))
-        clip, source_path = _section_at(sections, m.start())
-        key = (clip, in_tc, out_tc)
-        if key in seen:
+        span = TIME_RE.search(match.group("span"))
+        if not span:
             continue
-        seen.add(key)
-        cues.append(
-            DuckCue(
-                clip=clip,
-                in_tc=in_tc,
-                out_tc=out_tc,
-                duration_s=dur,
-                label=label,
-                source_path=source_path,
-            )
+        in_tc, out_tc = span.group("in"), span.group("out")
+        clip, source_path = _section_at(sections, match.start())
+        _remember(
+            cues,
+            seen,
+            clip=clip,
+            source_path=source_path,
+            in_tc=in_tc,
+            out_tc=out_tc,
+            duration_s=_duration_seconds(in_tc, out_tc, match.group("length")),
+            label=_clean_label(match.group("label")),
         )
 
-    # Style B: bullet  - **03:18–03:32 (~14s)** — label
-    bullet = re.compile(
-        r"^[\t ]*[-*]\s+\*\*"
-        r"(?P<span>\d{1,2}:\d{2}(?::\d{2})?\s*[–—-]\s*\d{1,2}:\d{2}(?::\d{2})?)"
-        r"(?:\s*\((?P<len>~?\s*\d+(?:\.\d+)?\s*s)\))?"
-        r"\*\*"
-        r"(?:\s*[—–-]\s*(?P<label>.+))?$",
-        re.M,
-    )
-    for m in bullet.finditer(text):
-        tm = TIME_RE.search(m.group("span"))
-        if not tm:
+    # Style B: list items. Bold is optional. Duration may sit inside or after the span.
+    #   - **03:18–03:32 (~14s)** — label
+    #   - **03:18–03:32** (~14s) — label
+    #   - 01:20->01:34 (~14s) — label
+    # Numbered remux indexes under a skipped heading are not cues.
+    for match in _LIST_ITEM_RE.finditer(text):
+        if _in_skipped_heading(skipped, match.start()):
             continue
-        in_tc, out_tc = tm.group("in"), tm.group("out")
-        len_raw = m.group("len") or ""
-        lm = LEN_RE.search(len_raw) if len_raw else None
-        if lm:
-            dur = float(lm.group("sec"))
-        else:
-            dur = max(0.0, _tc_to_seconds(out_tc) - _tc_to_seconds(in_tc))
-        label = (m.group("label") or "").strip()
-        label = re.sub(r"\*\*", "", label)
-        clip, source_path = _section_at(sections, m.start())
-        key = (clip, in_tc, out_tc)
-        if key in seen:
+        parsed = _span_from_body(match.group("body"))
+        if parsed is None:
             continue
-        seen.add(key)
-        cues.append(
-            DuckCue(
-                clip=clip,
-                in_tc=in_tc,
-                out_tc=out_tc,
-                duration_s=dur,
-                label=label,
-                source_path=source_path,
-            )
+        in_tc, out_tc, duration_s, label = parsed
+        clip, source_path = _section_at(sections, match.start())
+        _remember(
+            cues,
+            seen,
+            clip=clip,
+            source_path=source_path,
+            in_tc=in_tc,
+            out_tc=out_tc,
+            duration_s=duration_s,
+            label=label,
         )
 
     return cues

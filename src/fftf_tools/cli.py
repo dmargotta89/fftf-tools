@@ -70,7 +70,13 @@ def main() -> None:
 @click.option("--min-min", default=8.0, show_default=True, type=float, help="Min duration minutes (YT).")
 @click.option("--max-min", default=12.0, show_default=True, type=float, help="Max duration minutes (YT).")
 def vo_check_cmd(path: Path, min_min: float, max_min: float) -> None:
-    """Validate VO-timing markdown (exit 0 PASS / 1 FAIL)."""
+    """Validate VO-timing markdown (exit 0 PASS / 1 FAIL).
+
+    \b
+    Examples:
+      fftf vo-check samples/ep03-watergate-v1.1-vo-timing-v3.md
+      fftf vo-check path/to/vo-timing.md --min-min 8 --max-min 12
+    """
     code = run_vo_check(path, min_min=min_min, max_min=max_min)
     sys.exit(code)
 
@@ -80,7 +86,13 @@ def vo_check_cmd(path: Path, min_min: float, max_min: float) -> None:
 @click.option("--vo", "vo_timing", default=None, type=click.Path(exists=True, dir_okay=False, path_type=Path), help="Optional VO-timing file.")
 @click.option("-o", "out_prefix", default="duck-cues", show_default=True, help="Output prefix for .csv and .md.")
 def duck_sheet_cmd(clip_notes: Path, vo_timing: Path | None, out_prefix: str) -> None:
-    """Parse CLIP-NOTES / duck-cues markdown; emit CSV + MD cue sheets."""
+    """Parse CLIP-NOTES / duck-cues markdown; emit CSV + MD cue sheets.
+
+    \b
+    Examples:
+      fftf duck-sheet samples/CLIP-NOTES.md -o /tmp/ep03-duck
+      fftf duck-sheet samples/CUT-AV-DUCK-CUES-2026-09-24.md --vo samples/ep03-watergate-v1.1-vo-timing-v3.md -o /tmp/ep03-cues
+    """
     run_duck_sheet(clip_notes, vo_timing=vo_timing, out_prefix=out_prefix)
 
 
@@ -89,7 +101,12 @@ def duck_sheet_cmd(clip_notes: Path, vo_timing: Path | None, out_prefix: str) ->
 @click.option("--title", required=True, type=str, help="Episode title.")
 @click.option("-o", "out_file", default=None, type=click.Path(path_type=Path), help="Output markdown file.")
 def drive_checklist_cmd(ep: int, title: str, out_file: Path | None) -> None:
-    """Write a Drive episode checklist markdown."""
+    """Write a Drive episode checklist markdown.
+
+    \b
+    Examples:
+      fftf drive-checklist --ep 3 --title "Watergate" -o /tmp/ep03-drive-checklist.md
+    """
     write_drive_checklist(ep=ep, title=title, out_file=out_file)
 
 
@@ -106,7 +123,12 @@ def thumb_safe_cmd(
     top: float,
     bottom: float,
 ) -> None:
-    """Draw thumbnail safe-zone overlay; warn if not 1280x720."""
+    """Draw thumbnail safe-zone overlay; warn if not 1280x720.
+
+    \b
+    Examples:
+      fftf thumb-safe /path/to/thumb.png -o /tmp/thumb-safe.png --side 0.10 --top 0.12 --bottom 0.12
+    """
     draw_thumb_safe(
         zone_image,
         overlay=overlay,
@@ -153,14 +175,24 @@ def distro_pack_cmd(
     thumb: Path | None,
     out_dir: Path | None,
 ) -> None:
-    """Write a local Studio paste pack. Does not upload or unlock Distro."""
-    run_distro_pack(
-        ep=ep,
-        title=title,
-        draft=draft,
-        vo_timing=vo_timing,
-        thumb=thumb,
-        out_dir=out_dir,
+    """Write a local Studio paste pack. Does not upload or unlock Distro.
+
+    \b
+    Examples:
+      fftf distro-pack --ep 3 --title "Watergate" \\
+        --draft samples/ep03-watergate-v1.1-vo-timing-v3.md \\
+        --vo samples/ep03-watergate-v1.1-vo-timing-v3.md \\
+        --thumb path/to/thumb.png -o /tmp/distro-ep03
+    """
+    _guard(
+        lambda: run_distro_pack(
+            ep=ep,
+            title=title,
+            draft=draft,
+            vo_timing=vo_timing,
+            thumb=thumb,
+            out_dir=out_dir,
+        )
     )
 
 
@@ -195,13 +227,22 @@ def shorts_cutter_cmd(
     title: str | None,
     out_dir: Path | None,
 ) -> None:
-    """Write a 4-cut Shorts bake brief. Does not render video."""
-    run_shorts_cutter(
-        ep=ep,
-        vo_timing=vo_timing,
-        clip_notes=clip_notes,
-        title=title,
-        out_dir=out_dir,
+    """Write a 4-cut Shorts bake brief. Does not render video.
+
+    \b
+    Examples:
+      fftf shorts-cutter --ep 3 --title "Watergate" \\
+        --vo samples/ep03-watergate-v1.1-vo-timing-v3.md \\
+        --clips samples/CLIP-NOTES.md -o /tmp/shorts-ep03
+    """
+    _guard(
+        lambda: run_shorts_cutter(
+            ep=ep,
+            vo_timing=vo_timing,
+            clip_notes=clip_notes,
+            title=title,
+            out_dir=out_dir,
+        )
     )
 
 
@@ -216,6 +257,11 @@ def brief_pack_cmd(topic: str, year_window: str, fences: str | None, episode_id:
     """Write a brief skeleton, ASSET-HUNT.md, and a machine JSON block.
 
     Source URLs are PLACEHOLDER. Distro stays blocked.
+
+    \b
+    Examples:
+      fftf brief-pack --topic "Glomar and Project Azorian" --year-window "1974" \\
+        --episode-id ep04-glomar-azorian -o /tmp/ep04
     """
     payload = _guard(
         lambda: run_brief_pack(
@@ -238,7 +284,13 @@ def brief_pack_cmd(topic: str, year_window: str, fences: str | None, episode_id:
 @click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path), help="Output directory.")
 @click.option("--json", "as_json", is_flag=True, help="Print the machine JSON block on stdout.")
 def claim_gate_cmd(path: Path, sources: str | None, fences: str | None, narration: Path | None, episode_id: str | None, out_dir: Path | None, as_json: bool) -> None:
-    """Write a verifier report. Exit 1 on FAIL. Distro stays blocked."""
+    """Write a verifier report. Exit 1 on FAIL. Distro stays blocked.
+
+    \b
+    Examples:
+      fftf claim-gate /tmp/ep04/ep04-glomar-azorian-brief.md -o /tmp/ep04/claim-1
+      fftf claim-gate /tmp/ep04/script/draft.md --narration /tmp/ep04/script/narration-only.md -o /tmp/ep04/claim-2
+    """
     payload = _guard(
         lambda: run_claim_gate(
             path,
@@ -265,6 +317,10 @@ def script_strip_cmd(brief: Path, locks: Path, episode_id: str | None, out_dir: 
 
     v1 uses TODO markers instead of a full documentary. Word counts are real.
     Spoken files omit the locked vocab. Distro stays blocked.
+
+    \b
+    Examples:
+      fftf script-strip /tmp/ep04/ep04-glomar-azorian-brief.md --locks /tmp/locks.json -o /tmp/ep04/script
     """
     payload = _guard(
         lambda: run_script_strip(
@@ -292,6 +348,10 @@ def picture_sync_cmd(vo_timing: Path, clip_notes: Path, assets_path: Path | None
     """Write SHOT-MAP, DUCK-SCHEDULE, and a picture-sync check.
 
     Reuses duck-sheet parsing. Distro stays blocked.
+
+    \b
+    Examples:
+      fftf picture-sync /tmp/ep04/script/vo-timing.md samples/CLIP-NOTES.md -o /tmp/ep04/picture
     """
     payload = _guard(
         lambda: run_picture_sync(
@@ -317,6 +377,11 @@ def thumb_pack_cmd(title_a: str, title_b: str, title_c: str, still: Path | None,
     """Write A/B/C thumb PNGs, thumb-brief.md, and a machine block.
 
     Without a still, Pillow draws title cards on a dark field. Distro stays blocked.
+
+    \b
+    Examples:
+      fftf thumb-pack --episode-id ep04-glomar-azorian \\
+        --title-a "The ship" --title-b "The cover" --title-c "The files" -o /tmp/ep04/thumb
     """
     payload = _guard(
         lambda: run_thumb_pack(
@@ -347,7 +412,14 @@ def _finish(payload: dict, lines: list[str], as_json: bool) -> None:
 @click.option("-o", "--out-dir", default=None, type=click.Path(path_type=Path), help="Output directory.")
 @click.option("--json", "as_json", is_flag=True, help="Print the result JSON on stdout.")
 def edit_pass_group(ctx: click.Context, pack: Path | None, backend: str | None, dry_run: bool, fallback_ffmpeg: bool, allow_pwe: bool, out_dir: Path | None, as_json: bool) -> None:
-    """First-pass edit. Dry-run default. Does not publish or rewrite spoken VO."""
+    """First-pass edit. Dry-run default. Does not publish or rewrite spoken VO.
+
+    \b
+    Examples:
+      fftf edit-pass --pack /tmp/ep05-pack -o /tmp/ep05-edit
+      fftf edit-pass --pack /tmp/ep05-pack --apply -o /tmp/ep05-edit
+      fftf edit-pass status --job /tmp/ep05-edit
+    """
     if ctx.invoked_subcommand is not None:
         return
     if pack is None:
@@ -378,7 +450,12 @@ def edit_pass_group(ctx: click.Context, pack: Path | None, backend: str | None, 
 @click.option("--job", required=True, help="Job id, output directory, or progress.json path.")
 @click.option("--json", "as_json", is_flag=True, help="Print the progress JSON on stdout.")
 def edit_pass_status_cmd(job: str, as_json: bool) -> None:
-    """Read edit/progress.json for a job. Does not publish."""
+    """Read edit/progress.json for a job. Does not publish.
+
+    \b
+    Examples:
+      fftf edit-pass status --job /tmp/ep05-edit
+    """
     payload = run_edit_status(job)
     lines = [
         f"status: {payload.get('status')}",
@@ -395,6 +472,13 @@ def distro_group() -> None:
     Order: yt-long, then shorts (needs the long-form URL), then podcast.
     podcast-extended is a separate GO and is not part of that wave.
     Script, Verifier, and Frame have no Distro path.
+
+    \b
+    Examples:
+      fftf distro status --pack /tmp/ep05-pack -o /tmp/ep05-distro
+      fftf distro yt-long --pack /tmp/ep05-pack -o /tmp/ep05-distro
+      fftf distro shorts --pack /tmp/ep05-pack --longform-url https://example.com/ep05 -o /tmp/ep05-distro
+      fftf distro podcast --pack /tmp/ep05-pack -o /tmp/ep05-distro
     """
 
 
@@ -415,7 +499,12 @@ def _distro_finish(payload: dict, as_json: bool) -> None:
 @click.option("--allow-pwe", is_flag=True)
 @click.option("--json", "as_json", is_flag=True)
 def distro_status_cmd(pack: Path, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
-    """Readiness report and size checklist. Never publishes."""
+    """Readiness report and size checklist. Never publishes.
+
+    \b
+    Examples:
+      fftf distro status --pack /tmp/ep05-pack -o /tmp/ep05-distro
+    """
     payload = _guard(lambda: run_distro_status(pack, out_dir=out_dir, allow_pwe=allow_pwe))
     _distro_finish(payload, as_json)
 
@@ -427,7 +516,12 @@ def distro_status_cmd(pack: Path, out_dir: Path | None, allow_pwe: bool, as_json
 @click.option("--allow-pwe", is_flag=True)
 @click.option("--json", "as_json", is_flag=True)
 def distro_yt_long_cmd(pack: Path, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
-    """YouTube long-form wave. First in order. Does not call YouTube."""
+    """YouTube long-form wave. First in order. Does not call YouTube.
+
+    \b
+    Examples:
+      fftf distro yt-long --pack /tmp/ep05-pack -o /tmp/ep05-distro
+    """
     payload = _guard(
         lambda: run_distro_yt_long(pack, apply=not dry_run, out_dir=out_dir, allow_pwe=allow_pwe)
     )
@@ -442,7 +536,12 @@ def distro_yt_long_cmd(pack: Path, dry_run: bool, out_dir: Path | None, allow_pw
 @click.option("--allow-pwe", is_flag=True)
 @click.option("--json", "as_json", is_flag=True)
 def distro_shorts_cmd(pack: Path, longform_url: str | None, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
-    """Shorts A–D after yt-long. Hooks stay claim-gated. Does not call YouTube."""
+    """Shorts A–D after yt-long. Hooks stay claim-gated. Does not call YouTube.
+
+    \b
+    Examples:
+      fftf distro shorts --pack /tmp/ep05-pack --longform-url https://example.com/ep05 -o /tmp/ep05-distro
+    """
     payload = _guard(
         lambda: run_distro_shorts(
             pack,
@@ -462,7 +561,12 @@ def distro_shorts_cmd(pack: Path, longform_url: str | None, dry_run: bool, out_d
 @click.option("--allow-pwe", is_flag=True)
 @click.option("--json", "as_json", is_flag=True)
 def distro_podcast_cmd(pack: Path, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
-    """Podcast wave with a LOCKED cover and YT-length audio. Extended audio is not included."""
+    """Podcast wave with a LOCKED cover and YT-length audio. Extended audio is not included.
+
+    \b
+    Examples:
+      fftf distro podcast --pack /tmp/ep05-pack -o /tmp/ep05-distro
+    """
     payload = _guard(
         lambda: run_distro_podcast(pack, apply=not dry_run, out_dir=out_dir, allow_pwe=allow_pwe)
     )
@@ -477,7 +581,12 @@ def distro_podcast_cmd(pack: Path, dry_run: bool, out_dir: Path | None, allow_pw
 @click.option("--allow-pwe", is_flag=True)
 @click.option("--json", "as_json", is_flag=True)
 def distro_podcast_extended_cmd(pack: Path, go_path: Path | None, dry_run: bool, out_dir: Path | None, allow_pwe: bool, as_json: bool) -> None:
-    """Optional extended podcast audio. Separate GO. Not part of the YT wave."""
+    """Optional extended podcast audio. Separate GO. Not part of the YT wave.
+
+    \b
+    Examples:
+      fftf distro podcast-extended --pack /tmp/ep05-pack --go /tmp/ep05-pack/podcast-extended-go.json
+    """
     payload = _guard(
         lambda: run_distro_podcast_extended(
             pack,

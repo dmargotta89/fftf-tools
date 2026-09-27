@@ -5,6 +5,7 @@ from click.testing import CliRunner
 
 from fftf_tools.cli import main
 from fftf_tools.distro_pack import build_title, run_distro_pack
+from fftf_tools.schema import validate_machine
 from fftf_tools.vo_check import validate_vo_timing
 from fftf_tools.vo_sections import estimated_duration_seconds, parse_sections
 
@@ -140,7 +141,12 @@ def test_no_vo_headers_and_copied_locator_only(tmp_path: Path):
     assert data["chapters_estimated"] is False
     assert len(data["sources"]) == 1
     assert data["sources"][0]["locator"] == "https://example.com/already-in-draft"
+    assert data["sources"][0]["url"] == data["sources"][0]["locator"]
+    assert data["sources"][0]["n"] == 1
     assert data["sources"][0]["verified"] is False
+    assert all(item["rule"] and item["status"] in {"held", "broken", "unknown"} for item in data["fences"])
+    assert any(item["id"] == "no-publish" and item["status"] == "held" for item in data["fences"])
+    assert validate_machine(data) == []
 
 
 def test_title_stays_within_youtube_limit():

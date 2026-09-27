@@ -88,6 +88,57 @@ def test_wave2_machine_block_validates_and_verified_stays_false():
     assert sealed["sources"][0]["verified"] is False
 
 
+def test_seal_fills_dual_source_and_fence_fields():
+    sealed = seal(
+        {
+            "episode_id": "ep04-glomar-azorian",
+            "sources": [{"id": "s1", "locator": "PLACEHOLDER", "label": "primary"}],
+            "fences": [{"id": "no-publish", "text": "Do not publish.", "locked": True}],
+            "asset_index": [],
+            "distro_blocked": False,
+        }
+    )
+    source = sealed["sources"][0]
+    assert source["n"] == 1
+    assert source["url"] == "PLACEHOLDER"
+    assert source["locator"] == source["url"]
+    assert source["verified"] is False
+    fence = sealed["fences"][0]
+    assert fence["rule"] == "Do not publish."
+    assert fence["text"] == "Do not publish."
+    assert fence["status"] == "held"
+    assert sealed["distro_blocked"] is True
+    assert validate_machine(sealed) == []
+
+
+def test_seal_rejects_a_fence_status_outside_the_enum():
+    try:
+        seal(
+            {
+                "episode_id": "ep04-glomar-azorian",
+                "sources": [],
+                "fences": [{"id": "no-publish", "text": "Do not publish.", "status": "ok"}],
+                "asset_index": [],
+                "distro_blocked": True,
+            }
+        )
+        raised = False
+    except ContractError:
+        raised = True
+    assert raised
+
+
+def test_asset_keeps_license_and_digest_without_a_beat():
+    from fftf_tools.schema import Asset
+
+    data = Asset(path="clips/hero.png", role="hero", license="PD", sha256="abc").to_dict()
+    assert data == {"path": "clips/hero.png", "role": "hero", "license": "PD", "sha256": "abc"}
+    with_beat = Asset(path="clips/hero.png", beat="reveal", license="gov", sha256="").to_dict()
+    assert with_beat["beat"] == "reveal"
+    assert with_beat["license"] == "gov"
+    assert with_beat["sha256"] == ""
+
+
 def test_pipeline_modules_do_not_call_out():
     root = Path(__file__).resolve().parents[1] / "src" / "fftf_tools"
     for path in root.glob("*.py"):

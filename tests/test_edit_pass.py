@@ -92,6 +92,19 @@ def test_edit_pass_dry_run_happy(tmp_path: Path):
     machine = json.loads((out / "ep05.machine.json").read_text(encoding="utf-8"))
     assert machine["distro_blocked"] is True
     assert validate_machine(machine) == []
+    assert machine["sources"]
+    for source in machine["sources"]:
+        assert source["verified"] is False
+        assert source["url"] == source["locator"]
+        assert source["n"] >= 1
+    for fence in machine["fences"]:
+        assert fence["rule"]
+        assert fence["text"]
+        assert fence["status"] in {"held", "broken", "unknown"}
+    licensed = [asset for asset in machine["asset_index"] if asset.get("license")]
+    assert licensed
+    assert all(asset.get("sha256") for asset in licensed)
+    assert any(asset["license"] == "PD" for asset in licensed)
     assert hash_path(vo) == before["vo"]
     assert hash_path(narration) == before["narration"]
     assert hash_path(caption) == before["caption"]
@@ -99,6 +112,34 @@ def test_edit_pass_dry_run_happy(tmp_path: Path):
     status = run_edit_status(str(out))
     assert status["ok"] is True
     assert status["job_id"] == result["job_id"]
+
+
+def test_edit_pass_dry_run_refuses_the_same_gates(tmp_path: Path):
+    cases = (
+        ({"script_stamped": False}, "gate_script_unstamped"),
+        ({"drop_live_thumbs": True}, "gate_thumb_live_missing"),
+        ({"wording_hash_override": "0" * 64}, "gate_wording_hash_mismatch"),
+        ({"blank_license": True}, "gate_license_missing"),
+        ({"caption_equals_notes": True}, "gate_caption_safe_equals_notes"),
+    )
+    for kwargs, code in cases:
+        pack = build_episode_pack(tmp_path / code, **kwargs)
+        out = tmp_path / f"dry-{code}"
+        result = run_edit_pass(pack, out_dir=out)
+        assert result["dry_run"] is True
+        assert result["ok"] is False
+        assert result["applied"] is False
+        assert code in result["blockers"]
+        assert result["distro_blocked"] is True
+        assert result["published"] is False
+        assert not list(out.glob("masters/*.mp4"))
+        progress = json.loads((out / "edit" / "progress.json").read_text(encoding="utf-8"))
+        assert progress["status"] == "blocked"
+        assert progress["dry_run"] is True
+        assert code in progress["blockers"]
+        machine = json.loads((out / "ep05.machine.json").read_text(encoding="utf-8"))
+        assert machine["distro_blocked"] is True
+        assert validate_machine(machine) == []
 
 
 def test_edit_pass_apply_writes_master_and_leaves_vo(tmp_path: Path):
